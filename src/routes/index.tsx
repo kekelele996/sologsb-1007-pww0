@@ -12,8 +12,10 @@ import {
   onMount,
   untrack,
 } from "solid-js";
-import { createSeedProject, uid } from "../data";
+import { uid } from "../data";
 import { downloadText, formatTime, loadProject, parseTime, saveProject } from "../persistence";
+import { applySpeakerRename, resolveImportSpeakers } from "../speakers";
+import { parseTimedTranscript } from "../transcript";
 import type { Confidence, PersistedEnvelope, ProjectData, Segment, TranscriptTrack } from "../types";
 
 const CHANNEL_NAME = "sologsb-1007-editor";
@@ -23,81 +25,6 @@ function statusText(status: "saved" | "saving" | "offline") {
   if (status === "saving") return "正在保存";
   if (status === "offline") return "离线草稿";
   return "已自动保存";
-}
-
-function parseTimedTranscript(input: string, trackName: string): TranscriptTrack {
-  const blocks = input.trim().split(/\n\s*\n/);
-  const segments: Segment[] = [];
-  const srtPattern = /(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})\s*-->\s*(\d{1,2}:\d{2}:\d{2}[,.]\d{1,3})/;
-  const bracketPattern = /^\[?(\d{1,2}:\d{2}(?::\d{2})?)\]?\s*[-–]?\s*(.*)$/;
-
-  for (const rawBlock of blocks) {
-    const lines = rawBlock.split("\n").map((line) => line.trim()).filter(Boolean);
-    if (!lines.length) continue;
-    const srtIndex = lines.findIndex((line) => srtPattern.test(line));
-    if (srtIndex >= 0) {
-      const match = srtPattern.exec(lines[srtIndex]);
-      const text = lines.slice(srtIndex + 1).join(" ");
-      const speakerName = text.match(/^([^：:]{1,10})[：:]/)?.[1];
-      segments.push({
-        id: uid("seg"),
-        start: parseTime(match?.[1] ?? "0"),
-        end: parseTime(match?.[2] ?? "1"),
-        speakerId: speakerName ? "sp-custom" : "sp-interviewer",
-        text: text.replace(/^[^：:]{1,10}[：:]\s*/, ""),
-        confidence: 3,
-        reviewed: false,
-        flags: { lowConfidence: false, dialect: false, properNoun: false },
-        tagIds: [],
-        comments: [],
-      });
-      continue;
-    }
-    for (const line of lines) {
-      const match = bracketPattern.exec(line);
-      if (!match) continue;
-      const start = parseTime(match[1]);
-      const text = match[2];
-      const speakerName = text.match(/^([^：:]{1,10})[：:]/)?.[1];
-      segments.push({
-        id: uid("seg"),
-        start,
-        end: start + Math.max(3, text.length / 5),
-        speakerId: speakerName ? "sp-custom" : "sp-interviewer",
-        text: text.replace(/^[^：:]{1,10}[：:]\s*/, ""),
-        confidence: 3,
-        reviewed: false,
-        flags: { lowConfidence: false, dialect: false, properNoun: false },
-        tagIds: [],
-        comments: [],
-      });
-    }
-  }
-
-  if (!segments.length && input.trim()) {
-    input.split("\n").map((line) => line.trim()).filter(Boolean).forEach((text, index) => {
-      segments.push({
-        id: uid("seg"),
-        start: index * 6,
-        end: index * 6 + 5.4,
-        speakerId: "sp-interviewer",
-        text,
-        confidence: 3,
-        reviewed: false,
-        flags: { lowConfidence: false, dialect: false, properNoun: false },
-        tagIds: [],
-        comments: [],
-      });
-    });
-  }
-
-  return {
-    id: uid("track"),
-    name: trackName || "导入轨",
-    language: "待识别",
-    status: "待校对",
-    segments,
-  };
 }
 
 export default function OralHistoryEditor() {
@@ -142,10 +69,10 @@ export default function OralHistoryEditor() {
     project().speakers.find((speaker) => speaker.id === speakerId) ?? project().speakers[0];
   const tagById = (tagId: string) => project().tags.find((tag) => tag.id === tagId);
 
-  const commit = (label: string, mutate: (draft: ProjectData) => void) => {
+  const commit = <T,>(label: string, mutate: (draft: ProjectData) => T): T => {
     const current = structuredClone(project());
     const next = structuredClone(current);
-    mutate(next);
+    const result = mutate(next);
     next.updatedAt = new Date().toISOString();
     batch(() => {
       setPast((items) => [...items.slice(-49), current]);
@@ -155,6 +82,7 @@ export default function OralHistoryEditor() {
       setLastAction(label);
     });
     dirty = true;
+    return result;
   };
 
   const commitSegment = (label: string, mutate: (segment: Segment, draft: ProjectData) => void) => {
@@ -331,16 +259,58 @@ export default function OralHistoryEditor() {
 
   const importFile = async (file: File) => {
     const text = await file.text();
-    const imported = parseTimedTranscript(text, file.name.replace(/\.[^.]+$/, ""));
-    if (!imported.segments.length) {
+    const parsed = parseTimedTranscript(text, file.name.replace(/\.[^.]+$/, ""));
+    if (!parsed.segments.length) {
       setLastAction("未识别到带时间码的文本");
       return;
     }
-    commit("导入转写文本", (draft) => {
-      draft.tracks.push(imported);
-      draft.activeTrackId = imported.id;
-      setSelectedId(imported.segments[0].id);
+    const resolution = commit("导入转写文本", (draft) => {
+      const fallback = draft.speakers.find((speaker) => speaker.id === "sp-interviewer") ?? draft.speakers[0];
+      const resolved = resolveImportSpeakers(
+        draft.speakers,
+        parsed.segments.map((segment) => segment.speakerName),
+        fallback?.id ?? "",
+      );
+      draft.speakers.push(...resolved.created);
+      const track: TranscriptTrack = {
+        id: uid("track"),
+        name: parsed.name,
+        language: "待识别",
+        status: "待校对",
+        segments: parsed.segments.map((segment, index) => {
+          const { speakerName: _speakerName, ...rest } = segment;
+          return { ...rest, speakerId: resolved.speakerIds[index] };
+        }),
+      };
+      draft.tracks.push(track);
+      draft.activeTrackId = track.id;
+      setSelectedId(track.segments[0].id);
+      return resolved;
     });
+    const createdCount = resolution.created.length;
+    const reusedCount = resolution.reused;
+    const createdNote = createdCount ? `新增 ${createdCount} 名角色` : "未新增角色";
+    const reusedNote = reusedCount ? ` · 复用 ${reusedCount} 名同名角色` : "";
+    setLastAction(`导入「${parsed.name}」${parsed.segments.length} 段 · ${createdNote}${reusedNote}`);
+  };
+
+  const speakerSegmentCount = (speakerId: string) =>
+    project().tracks.reduce(
+      (total, track) => total + track.segments.filter((segment) => segment.speakerId === speakerId).length,
+      0,
+    );
+
+  const renameSpeaker = (speakerId: string, rawName: string) => {
+    const name = rawName.trim();
+    const previous = project().speakers.find((speaker) => speaker.id === speakerId)?.name ?? "";
+    if (!previous || !name || name === previous) return false;
+    const result = commit(`重命名角色「${previous}」`, (draft) => applySpeakerRename(draft, speakerId, rawName));
+    if (result.outcome === "merged") {
+      setLastAction(`「${previous}」与同名角色「${result.targetName}」已合并，两边片段归到同一角色`);
+    } else if (result.outcome === "renamed") {
+      setLastAction(`角色「${previous}」已改名为「${result.name}」，所有轨道同步更新`);
+    }
+    return result.outcome === "renamed" || result.outcome === "merged";
   };
 
   const resolveConflict = (useIncoming: boolean) => {
@@ -532,6 +502,32 @@ export default function OralHistoryEditor() {
             />
             <button class="wide-action" onClick={() => fileInputRef?.click()}><span>＋</span> 导入带时间码文本</button>
             <div class="hint">支持 SRT / VTT / 每行 `[00:12] 文本`</div>
+          </section>
+
+          <section class="panel-section">
+            <div class="section-title"><h2>人物角色</h2><span>{project().speakers.length}</span></div>
+            <div class="speaker-list">
+              <For each={project().speakers}>
+                {(speaker) => (
+                  <div class="speaker-row">
+                    <i class="speaker-dot" style={{ background: speaker.color }} />
+                    <div class="speaker-fields">
+                      <input
+                        aria-label={`重命名角色 ${speaker.name}`}
+                        value={speaker.name}
+                        onChange={(event) => {
+                          if (!renameSpeaker(speaker.id, event.currentTarget.value)) {
+                            event.currentTarget.value = speaker.name;
+                          }
+                        }}
+                      />
+                      <small>{speaker.role} · {speakerSegmentCount(speaker.id)} 段</small>
+                    </div>
+                  </div>
+                )}
+              </For>
+            </div>
+            <div class="hint">改名后所有轨道同步更新；与已有角色同名时自动合并片段。</div>
           </section>
 
           <section class="panel-section tag-summary">

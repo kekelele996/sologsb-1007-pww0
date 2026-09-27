@@ -89,6 +89,16 @@ kbd { padding: 2px 5px; border: 1px solid rgba(0,0,0,.15); border-bottom-width: 
 .legend span { display: flex; align-items: center; gap: 4px; }
 .legend i { width: 7px; height: 7px; border-radius: 2px; }
 
+.speaker-list { display: grid; gap: 7px; }
+.speaker-row { display: grid; grid-template-columns: 10px 1fr; gap: 9px; align-items: center; background: #f4f3ee; border: 1px solid transparent; border-radius: 9px; padding: 8px 9px; }
+.speaker-row:focus-within { border-color: #b8cae4; background: #fff; }
+.speaker-dot { width: 10px; height: 30px; border-radius: 3px; }
+.speaker-fields { min-width: 0; display: grid; gap: 2px; }
+.speaker-fields input { width: 100%; border: 1px solid transparent; background: transparent; padding: 2px 5px; border-radius: 5px; font-size: 12px; font-weight: 700; color: #2b343b; }
+.speaker-fields input:hover { border-color: #d4d3cb; }
+.speaker-fields input:focus { border-color: #9bbce2; background: #fff; outline: none; }
+.speaker-fields small { color: #76818a; font-size: 10px; padding-left: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 .panel-toolbar { height: 88px; padding: 15px 20px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; background: #f9f8f3; }
 .panel-toolbar h1 { font-size: 19px; margin: 3px 0 0; }
 .filters { display: flex; padding: 3px; border-radius: 9px; background: #e9e8e2; }
