@@ -81,6 +81,15 @@ kbd { padding: 2px 5px; border: 1px solid rgba(0,0,0,.15); border-bottom-width: 
 .track-info strong { font-size: 12px; margin-bottom: 3px; }
 .track-info small { font-size: 10px; color: #76818a; }
 .track-dot { width: 8px; height: 8px; border-radius: 50%; }
+.speaker-list { display: grid; gap: 7px; }
+.speaker-row { display: grid; grid-template-columns: 10px 1fr; gap: 9px; align-items: center; background: #f4f3ee; border: 1px solid transparent; border-radius: 9px; padding: 8px 9px; }
+.speaker-row:hover { background: #eeece5; }
+.speaker-dot { width: 9px; height: 9px; border-radius: 50%; justify-self: center; }
+.speaker-fields { min-width: 0; display: grid; gap: 2px; }
+.speaker-fields input { width: 100%; border: 1px solid transparent; background: transparent; border-radius: 6px; padding: 3px 6px; font-size: 12px; font-weight: 700; color: #253039; }
+.speaker-fields input:hover { border-color: #d4d3cb; background: #fff; }
+.speaker-fields input:focus { border-color: #9bbce2; background: #fff; outline: none; }
+.speaker-fields small { color: #76818a; font-size: 10px; padding-left: 6px; }
 .wide-action { width: 100%; border: 1px dashed #aeb9c3; background: #f8fafc; color: #334e68; border-radius: 8px; padding: 10px; margin-top: 10px; cursor: pointer; font-weight: 650; }
 .wide-action:hover { background: #eef4f9; }
 .wide-action span { margin-right: 4px; font-size: 17px; }

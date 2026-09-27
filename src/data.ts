@@ -1,7 +1,103 @@
-import type { Confidence, ProjectData, Segment, Tag } from "./types";
+import type { Confidence, ProjectData, Segment, Speaker, Tag } from "./types";
 
 export const uid = (prefix = "id") =>
   `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+export const SPEAKER_PALETTE = [
+  "#2563eb",
+  "#be185d",
+  "#0f766e",
+  "#b45309",
+  "#7c3aed",
+  "#dc2626",
+  "#0369a1",
+  "#4d7c0f",
+];
+
+export const makeSpeaker = (name: string, role: string, colorIndex: number): Speaker => ({
+  id: uid("sp"),
+  name,
+  role,
+  color: SPEAKER_PALETTE[colorIndex % SPEAKER_PALETTE.length],
+});
+
+export interface ImportSpeakerPlan {
+  /** speakerId aligned with each parsed segment, by index. */
+  assignments: string[];
+  /** Speakers that need to be appended to the project roster. */
+  newSpeakers: Speaker[];
+}
+
+/**
+ * Resolves the speaker names found in one imported document against the
+ * project roster: identical names inside the document share one speaker,
+ * names already on the roster are reused, and only genuinely new names
+ * create a speaker.
+ */
+export const planImportSpeakers = (
+  segmentSpeakerNames: string[],
+  speakers: Speaker[],
+  fallbackId: string,
+): ImportSpeakerPlan => {
+  const idByName = new Map<string, string>();
+  const newSpeakers: Speaker[] = [];
+  const assignments = segmentSpeakerNames.map((rawName) => {
+    const name = rawName.trim();
+    if (!name) return fallbackId;
+    const mapped = idByName.get(name);
+    if (mapped) return mapped;
+    const existing = speakers.find((speaker) => speaker.name === name);
+    if (existing) {
+      idByName.set(name, existing.id);
+      return existing.id;
+    }
+    const created = makeSpeaker(name, "待确认", speakers.length + newSpeakers.length);
+    newSpeakers.push(created);
+    idByName.set(name, created.id);
+    return created.id;
+  });
+  return { assignments, newSpeakers };
+};
+
+/** Reassigns every segment from one speaker to another across all tracks, then drops the emptied speaker. */
+export const mergeSpeakers = (draft: ProjectData, fromId: string, toId: string) => {
+  for (const track of draft.tracks) {
+    for (const segment of track.segments) {
+      if (segment.speakerId === fromId) segment.speakerId = toId;
+    }
+  }
+  draft.speakers = draft.speakers.filter((speaker) => speaker.id !== fromId);
+};
+
+/**
+ * Older drafts may reference speaker ids that no longer exist on the roster
+ * (early imports folded every detected name into one placeholder id).
+ * Re-create a placeholder speaker for each dangling id so every segment
+ * keeps its own speaker reference and stays editable. Only ever adds
+ * speakers; segments are left untouched.
+ */
+export const repairDanglingSpeakers = (project: ProjectData): ProjectData => {
+  const known = new Set(project.speakers.map((speaker) => speaker.id));
+  const dangling: string[] = [];
+  for (const track of project.tracks) {
+    for (const segment of track.segments) {
+      if (!known.has(segment.speakerId) && !dangling.includes(segment.speakerId)) {
+        dangling.push(segment.speakerId);
+      }
+    }
+  }
+  if (!dangling.length) return project;
+  const speakers = [...project.speakers];
+  dangling.forEach((id, index) => {
+    speakers.push({
+      id,
+      name: dangling.length > 1 ? `未识别发言人 ${index + 1}` : "未识别发言人",
+      role: "待确认",
+      color: SPEAKER_PALETTE[(project.speakers.length + index) % SPEAKER_PALETTE.length],
+    });
+  });
+  return { ...project, speakers };
+};
 
 export const makeTag = (label: string, type: Tag["type"], color: string): Tag => ({
   id: uid("tag"),
